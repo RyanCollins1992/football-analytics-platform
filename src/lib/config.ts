@@ -16,19 +16,23 @@ export interface LeagueConfig {
   enabled: boolean;
   /**
    * football-data.org competition code (see docs/providers.md) — undefined
-   * means this league isn't on football-data.org's free tier; API-Football
-   * is the only source for it.
+   * means this league isn't on football-data.org's free tier.
    */
   footballDataOrgCode?: string;
   /**
-   * api-football.com numeric league id. These are the commonly-published,
-   * long-stable IDs for each league, but NOT independently verified against
-   * a live API-Football account in this codebase yet — confirm each one
-   * with `GET /leagues?id=<id>` once real API access is wired up (Phase 3)
-   * before trusting them for a sync job. Wrong here means silently wrong
-   * data, so don't skip that verification.
+   * api-football.com numeric league id. CONFIRMED LIVE (2026-09-19): the
+   * free tier is restricted to 2022-2024 seasons only, on every endpoint —
+   * it cannot serve any current/live data regardless of which league this
+   * id points to. Kept for the future historical-backtesting phase only;
+   * do not use it as a live-sync source. See docs/providers.md.
    */
   apiFootballId?: number;
+  /**
+   * Sportmonks numeric league id. Sportmonks' free tier is genuinely
+   * current-season for its two covered leagues (confirmed live 2026-09-19 —
+   * see docs/providers.md) but is otherwise locked to exactly those two.
+   */
+  sportmonksLeagueId?: number;
 }
 
 export const SUPPORTED_LEAGUES: LeagueConfig[] = [
@@ -44,7 +48,7 @@ export const SUPPORTED_LEAGUES: LeagueConfig[] = [
   { id: "ligue-2", name: "Ligue 2", country: "France", tier: 2, enabled: true, apiFootballId: 62 },
   { id: "eredivisie", name: "Eredivisie", country: "Netherlands", tier: 1, enabled: true, footballDataOrgCode: "DED", apiFootballId: 88 },
   { id: "primeira-liga", name: "Primeira Liga", country: "Portugal", tier: 1, enabled: true, footballDataOrgCode: "PPL", apiFootballId: 94 },
-  { id: "scottish-premiership", name: "Scottish Premiership", country: "Scotland", tier: 1, enabled: true, apiFootballId: 179 },
+  { id: "scottish-premiership", name: "Scottish Premiership", country: "Scotland", tier: 1, enabled: true, apiFootballId: 179, sportmonksLeagueId: 501 },
 
   // Future — listed per the spec's "potential future leagues" but not synced yet.
   { id: "champions-league", name: "UEFA Champions League", country: "Europe", tier: 1, enabled: false, footballDataOrgCode: "CL", apiFootballId: 2 },
@@ -61,10 +65,27 @@ export function getEnabledLeagues(): LeagueConfig[] {
 }
 
 /** Which provider a data domain should ask first — see docs/providers.md for the division of labour. */
-export type ProviderId = "football-data-org" | "api-football" | "mock";
+export type ProviderId = "football-data-org" | "api-football" | "sportmonks" | "mock";
 
 export const DEFAULT_PROVIDER: ProviderId =
   (process.env.DEFAULT_PROVIDER as ProviderId) || "football-data-org";
+
+/**
+ * Which provider actually has *current* data for a league's standings/
+ * fixtures — not a preference, a fact. football-data.org first (it's the
+ * broader, better-documented API where it applies), Sportmonks for its two
+ * exclusive leagues, otherwise null: no free current-data source exists yet
+ * for that league (see docs/providers.md — this is currently Segunda
+ * División/2. Bundesliga/Serie B/Ligue 2, since API-Football's free tier
+ * turned out to be historical-only).
+ */
+export function resolveProviderForLeague(slug: string): ProviderId | null {
+  const league = getLeague(slug);
+  if (!league) return null;
+  if (league.footballDataOrgCode) return "football-data-org";
+  if (league.sportmonksLeagueId) return "sportmonks";
+  return null;
+}
 
 export const DEFAULT_LOOKBACK_MATCHES = 10;
 export const DEFAULT_SEASON = new Date().getFullYear();

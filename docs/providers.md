@@ -1,6 +1,6 @@
 # Football data providers
 
-Two free-tier providers, used together through the `FootballDataProvider` abstraction (`src/lib/providers/`) — neither alone covers everything in scope, and we are not paying for either.
+Three free-tier providers, used together through the `FootballDataProvider` abstraction (`src/lib/api/`) — no single one covers everything in scope, and we are not paying for any of them (see `resolveProviderForLeague` in `src/lib/config.ts` for the actual per-league routing). Sportmonks was added after API-Football's free tier turned out not to cover current-season data at all — see the correction and lesson-learned below.
 
 ## football-data.org (v4)
 
@@ -44,8 +44,8 @@ Request headers we can send: `X-Unfold-Lineups`, `X-Unfold-Bookings`, `X-Unfold-
 
 - Docs: https://www.api-football.com/documentation-v3 (site 403s automated fetches — read via a signed-in browser session or the account dashboard's own docs viewer when detail is needed).
 - Auth: `x-apisports-key` header (direct api-sports.io) — if going through RapidAPI instead it's `X-RapidAPI-Key`/`X-RapidAPI-Host`. We're using the direct api-sports.io dashboard key.
-- Free tier: **every endpoint and all 1,236+ leagues reachable** — the limit is request volume, not access. This is what gives us Segunda División, 2. Bundesliga, Serie B, Ligue 2, Scottish Premiership, plus lineups/injuries/statistics/xG where a league has them.
-- Role in this project: fills every gap football-data.org's free tier leaves — 2nd divisions, Scotland, player-level stats, injuries.
+- Free tier: every endpoint and all 1,236+ leagues are reachable by *league/data type* — but **⚠️ CORRECTED 2026-09-19, confirmed live: the free plan is also restricted to seasons 2022-2024, full stop.** A call for the current 2026 season on any endpoint (tested: `/standings`, `/fixtures`) returns `results: 0` with `errors.plan: "Free plans do not have access to this season, try from 2022 to 2024."` — `season=2023` on the same league/endpoint returns real data. This was wrong in the original research pass below (which only checked request-volume/league-count limits, never actually tried a current-season call) — **the free tier cannot serve any current/live data at all**, only 2022-2024 historical seasons.
+- Role in this project, given the correction: **historical backtesting data only** (Phase 8) for now. Does NOT fill the "current Segunda División/2. Bundesliga/Serie B/Ligue 2/Scottish Premiership" gap or provide current injuries/lineups/stats — that requires either a paid API-Football tier, a different free provider, or those capabilities stay unsynced. See the project's Phase 3b plan for how this was actually resolved.
 
 ### Rate limiting
 
@@ -61,18 +61,34 @@ Request headers we can send: `X-Unfold-Lineups`, `X-Unfold-Bookings`, `X-Unfold-
 4. Cache every response in Postgres; the website itself never calls either provider live on a page load — only the scheduled/manual sync jobs do.
 5. Track remaining quota locally (persist the last-seen `x-ratelimit-requests-remaining` value) and refuse to run a sync job that would exceed it, rather than discovering the 429 mid-job.
 
-## Division of labour (why both, not one)
+## Sportmonks (v3)
+
+- Docs: https://docs.sportmonks.com/v3
+- Auth: `?api_token=` query param (a header form also exists — `Authorization: <token>` — both count toward the same rate limit; the adapter uses the query param since that's the form actually confirmed working live).
+- Free tier: **confirmed live, 2026-09-19 — genuinely current-season**, unlike API-Football. `GET /leagues/501?include=currentSeason` returned `currentseason: { name: "2026/2027", is_current: true }`, and standings/fixtures pulled for that season matched real-world results (Celtic top of Scottish Premiership on 18 points from 6 games, confirmed against independent sources). Locked to exactly two leagues: Scottish Premiership (id `501`) and Danish Superliga — nothing else.
+- Rate limit: generous — 180/hour on the leagues/league calls made during verification (`rate_limit.remaining` in every response body, not a header). Confirmed header for the adapter: `x-ratelimit-remaining`.
+- Response shape is sparse-by-default with an `include` system (`?include=participant;details.type`) rather than a rich default payload — standings gives bare `position`/`points` until you include `details` (an array of typed stat rows, not flat fields: filter by `type.code`, e.g. `overall-goals-for`). Fixtures encode scores similarly, as a flat array of `{participant_id, description, score}` entries (`description: "CURRENT"` for the final/current score, `"1ST_HALF"` for half-time) rather than a clean nested object — more parsing work than football-data.org's shape, but well worth it for genuinely current data.
+- No matchday number exposed on the standings endpoint — the adapter uses the max games-played across rows as a proxy (see `src/lib/api/providers/sportmonks.ts`).
+- No injuries endpoint found in the documented endpoint list at all (checked 2026-09-19) — Sportmonks doesn't fill that gap either, on any tier.
+- Full fixture-state vocabulary (26 values, confirmed live via `GET /states`) is mapped many-to-one onto our `MatchStatus` enum in the adapter — finer-grained than what football-data.org exposes.
+
+## Division of labour (updated 2026-09-19 after live-verifying both the API-Football correction and Sportmonks)
 
 | Data need | Provider |
 |---|---|
-| Fixtures/results/standings — PL, Championship, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Primeira Liga, Champions League | football-data.org |
-| Fixtures/results/standings — Segunda División, 2. Bundesliga, Serie B, Ligue 2, Scottish Premiership | API-Football |
-| Lineups, injuries, match statistics (shots/possession/cards/corners), xG, player stats — any league | API-Football (only source with this on free tier) |
+| Fixtures/results/standings — PL, Championship, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Primeira Liga, Champions League | football-data.org (current season, confirmed live) |
+| Fixtures/results/standings — Scottish Premiership (current season) | **Sportmonks — confirmed live current-season, wired up and syncing (12 teams, 12 standings rows, 9 matches verified against the real database).** |
+| Fixtures/results/standings — Segunda División, 2. Bundesliga, Serie B, Ligue 2 (current season) | **No free current-season source found yet.** Stay unsynced (`enabled` in `src/lib/config.ts`, but no live provider covers them) until one is found. |
+| Historical backtesting data (2022-2024 seasons only) | API-Football free tier |
+| Lineups, injuries, match statistics (shots/possession/cards/corners), xG, player stats — current season, any league | **Not available free for current data on any of the three providers checked.** API-Football has this data type-wise but only for 2022-2024; Sportmonks has no injuries endpoint at all. |
 
-The `FootballDataProvider` interface must let a single logical operation (e.g. "get today's fixtures") merge results from both providers by competition, not assume one provider answers every call.
+The `FootballDataProvider` interface lets a single logical operation (e.g. "get standings") resolve to whichever provider actually covers that competition's *current* data — see `resolveProviderForLeague` in `src/lib/config.ts`.
 
 ## Explicitly not used
 
-- **Sportmonks** — free tier locked to Scottish Premiership + Danish Superliga only; doesn't fit the multi-league free strategy above.
 - **TheSportsDB** — too thin (10 results/endpoint cap on the free test key) for this project's stats depth.
 - **Sofascore / FotMob** — no public, documented, ToS-sanctioned API. Not used regardless of cost.
+
+## Lesson learned
+
+The API-Football "free tier has full access, just rate-limited" claim was accepted from secondary sources (comparison blog posts, marketing pages) without an actual live test call during the original research pass — the season restriction only surfaced when Phase 3b tried to sync current data and got a real error response. Every provider claim in this file that hasn't been marked "confirmed live" should be treated the same way API-Football's was: plausible, not verified, until an actual call proves it.

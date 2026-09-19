@@ -91,6 +91,7 @@ model Team {
   stadiumCapacity   Int?
   footballDataOrgId String?  @unique
   apiFootballId     String?  @unique
+  sportmonksId      String?  @unique
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -172,6 +173,7 @@ model Match {
   venue             String?
   footballDataOrgId String?     @unique
   apiFootballId     String?     @unique
+  sportmonksId      String?     @unique
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 

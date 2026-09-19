@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/database/client";
 import { getProvider } from "@/lib/api";
-import { getLeague } from "@/lib/config";
+import { getLeague, resolveProviderForLeague } from "@/lib/config";
 import { upsertTeamByProvider } from "@/services/upsert-team";
 import { logger } from "@/lib/api/logger";
 import type { NormalizedFixture } from "@/types/football";
@@ -30,7 +30,13 @@ export async function syncFixtures(
     throw new Error(`No current season for "${competitionSlug}" — run npm run seed first`);
   }
 
-  const provider = getProvider();
+  const providerId = resolveProviderForLeague(competitionSlug);
+  if (!providerId) {
+    throw new Error(
+      `No free current-season data source for "${competitionSlug}" yet — see docs/providers.md's "unsolved gap" note`
+    );
+  }
+  const provider = getProvider(providerId);
   logger.info("syncing fixtures", { competitionSlug, provider: provider.id, dateFrom, dateTo });
   const fixtures = await provider.getFixtures({ competitionSlug, dateFrom, dateTo });
 
@@ -87,6 +93,13 @@ async function upsertMatch(
       where: { apiFootballId: fixture.externalId },
       update: fields,
       create: { apiFootballId: fixture.externalId, ...fields },
+    });
+  }
+  if (providerId === "sportmonks") {
+    return prisma.match.upsert({
+      where: { sportmonksId: fixture.externalId },
+      update: fields,
+      create: { sportmonksId: fixture.externalId, ...fields },
     });
   }
   throw new Error(`upsertMatch: "${providerId}" is test-only and doesn't write real Match rows`);

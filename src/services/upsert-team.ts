@@ -23,5 +23,12 @@ export async function upsertTeamByProvider(providerId: ProviderId, team: Normali
       create: { apiFootballId: team.externalId, ...fields },
     });
   }
+  if (providerId === "sportmonks") {
+    return prisma.team.upsert({
+      where: { sportmonksId: team.externalId },
+      update: fields,
+      create: { sportmonksId: team.externalId, ...fields },
+    });
+  }
   throw new Error(`upsertTeamByProvider: "${providerId}" is test-only and doesn't write real Team rows`);
 }

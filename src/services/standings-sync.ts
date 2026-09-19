@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/database/client";
 import { getProvider } from "@/lib/api";
-import { getLeague } from "@/lib/config";
+import { getLeague, resolveProviderForLeague } from "@/lib/config";
 import { upsertTeamByProvider } from "@/services/upsert-team";
 import { logger } from "@/lib/api/logger";
 
@@ -26,7 +26,13 @@ export async function syncStandings(competitionSlug: string): Promise<SyncStandi
     throw new Error(`No current season for "${competitionSlug}" — run npm run seed first`);
   }
 
-  const provider = getProvider();
+  const providerId = resolveProviderForLeague(competitionSlug);
+  if (!providerId) {
+    throw new Error(
+      `No free current-season data source for "${competitionSlug}" yet — see docs/providers.md's "unsolved gap" note`
+    );
+  }
+  const provider = getProvider(providerId);
   logger.info("syncing standings", { competitionSlug, provider: provider.id });
   const standings = await provider.getStandings(competitionSlug);
 
