@@ -38,6 +38,33 @@ export function buildScorelineMatrix(lambdaHome: number, lambdaAway: number, max
   return { matrix, maxGoals };
 }
 
+export interface Scoreline {
+  homeGoals: number;
+  awayGoals: number;
+  probability: number;
+}
+
+/**
+ * The distribution's mode — the single most probable exact scoreline. Not
+ * the same as rounding (lambdaHome, lambdaAway): for a Poisson distribution
+ * the mode of the joint distribution isn't guaranteed to equal the rounded
+ * mean of each marginal, especially for non-integer lambdas. Used for
+ * "most likely score" displays and for exact-score prediction evaluation.
+ */
+export function mostLikelyScoreline(lambdaHome: number, lambdaAway: number, maxGoals = 6): Scoreline {
+  const { matrix } = buildScorelineMatrix(lambdaHome, lambdaAway, maxGoals);
+
+  let best: Scoreline = { homeGoals: 0, awayGoals: 0, probability: matrix[0][0] };
+  for (let h = 0; h < matrix.length; h++) {
+    for (let a = 0; a < matrix[h].length; a++) {
+      if (matrix[h][a] > best.probability) {
+        best = { homeGoals: h, awayGoals: a, probability: matrix[h][a] };
+      }
+    }
+  }
+  return best;
+}
+
 export interface OutcomeProbabilities {
   homeWinProbability: number;
   drawProbability: number;

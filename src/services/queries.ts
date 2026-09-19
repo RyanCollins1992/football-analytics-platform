@@ -83,14 +83,23 @@ export async function getMatchDetail(matchId: number) {
   });
 }
 
-/** Newest first, oriented to this team's perspective — no home/away branching needed by the analytics functions that consume this. */
-export async function getTeamMatchRecords(teamId: number): Promise<TeamMatchRecord[]> {
+/**
+ * Newest first, oriented to this team's perspective — no home/away branching
+ * needed by the analytics functions that consume this. `beforeDate`, when
+ * given, excludes any match at or after that moment — this is what makes
+ * prediction context assembly (src/services/build-match-context.ts) actually
+ * respect "never use future information" rather than just documenting the
+ * intent. Existing callers (Phase 5's stat pages) don't pass it and are
+ * unaffected.
+ */
+export async function getTeamMatchRecords(teamId: number, beforeDate?: Date): Promise<TeamMatchRecord[]> {
   const matches = await prisma.match.findMany({
     where: {
       status: "FINISHED",
       OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }],
       homeScore: { not: null },
       awayScore: { not: null },
+      ...(beforeDate ? { scheduledAt: { lt: beforeDate } } : {}),
     },
     orderBy: { scheduledAt: "desc" },
   });
@@ -130,6 +139,37 @@ export async function getHeadToHeadMatches(teamAId: number, teamBId: number): Pr
     homeScore: m.homeScore as number,
     awayScore: m.awayScore as number,
   }));
+}
+
+/**
+ * League-wide baseline scoring rates, as of `beforeDate` — needed by the
+ * Poisson model's attack/defense-strength calculation (Phase 6), computed
+ * fresh from real data rather than a hardcoded constant.
+ */
+export async function getLeagueAverageGoals(
+  competitionSlug: string,
+  beforeDate?: Date
+): Promise<{ avgHomeGoalsFor: number; avgAwayGoalsFor: number }> {
+  const matches = await prisma.match.findMany({
+    where: {
+      competition: { slug: competitionSlug },
+      status: "FINISHED",
+      homeScore: { not: null },
+      awayScore: { not: null },
+      ...(beforeDate ? { scheduledAt: { lt: beforeDate } } : {}),
+    },
+    select: { homeScore: true, awayScore: true },
+  });
+
+  if (matches.length === 0) return { avgHomeGoalsFor: 0, avgAwayGoalsFor: 0 };
+
+  const totalHomeGoals = matches.reduce((sum, m) => sum + (m.homeScore as number), 0);
+  const totalAwayGoals = matches.reduce((sum, m) => sum + (m.awayScore as number), 0);
+
+  return {
+    avgHomeGoalsFor: totalHomeGoals / matches.length,
+    avgAwayGoalsFor: totalAwayGoals / matches.length,
+  };
 }
 
 export async function getTeamsWithData() {

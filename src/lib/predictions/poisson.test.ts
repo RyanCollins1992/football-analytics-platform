@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildScorelineMatrix, deriveOutcomeProbabilities, poissonPmf } from "./poisson";
+import { buildScorelineMatrix, deriveOutcomeProbabilities, mostLikelyScoreline, poissonPmf } from "./poisson";
 
 describe("poissonPmf", () => {
   it("matches known values for lambda=1", () => {
@@ -60,5 +60,31 @@ describe("deriveOutcomeProbabilities", () => {
     const highScoring = deriveOutcomeProbabilities(2.5, 2.0);
     const lowScoring = deriveOutcomeProbabilities(0.6, 0.5);
     expect(highScoring.over25Probability).toBeGreaterThan(lowScoring.over25Probability);
+  });
+});
+
+describe("mostLikelyScoreline", () => {
+  it("picks a lopsided scoreline favoring the higher-lambda side", () => {
+    const result = mostLikelyScoreline(2.4, 0.5);
+    expect(result.homeGoals).toBeGreaterThan(result.awayGoals);
+  });
+
+  it("picks 0-0 for two teams that essentially never score", () => {
+    const result = mostLikelyScoreline(0.05, 0.05);
+    expect(result).toMatchObject({ homeGoals: 0, awayGoals: 0 });
+  });
+
+  it("the returned probability actually matches that cell in the full matrix", () => {
+    const { matrix } = buildScorelineMatrix(1.6, 1.2);
+    const result = mostLikelyScoreline(1.6, 1.2);
+    expect(result.probability).toBeCloseTo(matrix[result.homeGoals][result.awayGoals], 10);
+    // and it must be the actual max, not just *a* value from the matrix
+    const trueMax = Math.max(...matrix.flat());
+    expect(result.probability).toBeCloseTo(trueMax, 10);
+  });
+
+  it("is symmetric for equal lambdas: the mode sits on the diagonal", () => {
+    const result = mostLikelyScoreline(1.3, 1.3);
+    expect(result.homeGoals).toBe(result.awayGoals);
   });
 });

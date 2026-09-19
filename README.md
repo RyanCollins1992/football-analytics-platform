@@ -2,7 +2,7 @@
 
 A personal data-analysis and prediction platform for the top English, Scottish, and European football leagues — not a betting tool. Tracks fixtures, results, standings, and team/player statistics, and (in later phases) generates and backtests match predictions against actual results.
 
-This README documents **Phases 1-6 (foundation through the prediction engine)**. Later phases add their own sections here as they land — see the phase list at the bottom.
+This README documents **Phases 1-7 (foundation through prediction storage and evaluation)**. Later phases add their own sections here as they land — see the phase list at the bottom.
 
 ## Stack
 
@@ -48,7 +48,13 @@ Next.js (App Router) + TypeScript + Tailwind CSS + PostgreSQL + Prisma. See `doc
    npm run sync:fixtures -- scottish-premiership 2026-09-12 2026-09-20
    ```
    Upserts real `Team` rows and writes `LeagueStanding`/`Match` rows from the live API. Each sync is independently runnable — see Architecture below for why. Segunda División, 2. Bundesliga, Serie B, and Ligue 2 have no free current-season source yet — syncing them throws a clear error rather than silently doing nothing.
-6. Start the dev server:
+6. Generate and evaluate predictions for a synced match:
+   ```bash
+   npm run predict -- 1 poisson       # generates a Prediction row for match id 1 using the Poisson model
+   npm run evaluate                    # evaluates every prediction whose match has since finished
+   ```
+   Known model ids: `simple-average`, `recent-form`, `home-away`, `poisson`. Predictions are never overwritten — every run creates a new row — and evaluating the same prediction twice fails loudly rather than silently recomputing.
+7. Start the dev server:
    ```bash
    npm run dev
    ```
@@ -68,6 +74,8 @@ Next.js (App Router) + TypeScript + Tailwind CSS + PostgreSQL + Prisma. See `doc
 | `npm run seed` | Seed Competition + Season rows from `src/lib/config.ts` |
 | `npm run sync:standings -- <slug>` | Fetch + upsert Teams and write a LeagueStanding snapshot for one league |
 | `npm run sync:fixtures -- <slug> [from] [to]` | Fetch + upsert Teams and Match rows for one league |
+| `npm run predict -- <matchId> <modelId>` | Generate and store a new Prediction row for one match |
+| `npm run evaluate` | Evaluate every prediction whose match has finished and has no result yet |
 
 Run `lint`, `typecheck`, and `test` after every change — that's the check loop this project follows at every phase.
 
@@ -85,7 +93,8 @@ Run `lint`, `typecheck`, and `test` after every change — that's the check loop
 - `src/services/queries.ts` — read-side Prisma queries used by pages (`getLeagueWithLatestStandings`, `getUpcomingFixtures`, `getRecentResults`, `getTeamWithMatches`, `getMatchDetail`, `getTeamsWithData`), separate from the write-side sync services above.
 - `src/app/leagues/`, `/teams/`, `/matches/` — Server Components querying Prisma directly (no API routes — this is one app, not a frontend talking to a separate backend). `/leagues/[slug]`, `/teams/[id]`, and `/matches/[id]` all declare `export const dynamic = "force-dynamic"` where Next.js's default static optimization would otherwise have baked in build-time database state for pages with no dynamic route segment (`/leagues`, `/teams` needed this explicitly — caught during Phase 4's own build verification).
 - `src/lib/analytics/` — the actual stats engine, pure functions with no Prisma calls (fixture-tested, no DB needed): `weighting.ts` (swappable recency-weighting strategies), `team-stats.ts` (`computeTeamStats` — one function for overall/home/away/recent-form, callers just pass the filtered/sliced record subset; `computeWeightedForm` for a single recency-weighted points-per-game score), `head-to-head.ts` (`computeHeadToHead` — W/D/L/BTTS/over-under from either team's perspective, plus the same weighting utility). `src/services/queries.ts`'s `getTeamMatchRecords`/`getHeadToHeadMatches` are the DB-facing glue that turns `Match` rows into the plain arrays these functions consume.
-- `src/lib/predictions/` — the prediction engine, also pure/DB-free (no `Prediction` rows are written yet — that's Phase 7). `poisson.ts` is the shared statistics engine every model feeds into (a (λ_home, λ_away) pair → full scoreline matrix → win/draw/win, BTTS, over 1.5/2.5/3.5 probabilities) — a model's only real job is estimating λ, not re-deriving probabilities. `models/` holds the four spec models as a genuine complexity ladder (`simple-average.ts` → `recent-form.ts` → `home-away.ts` → `poisson-model.ts`, each strictly using more information than the last — see inline comments for the exact formula each uses). `index.ts`'s `getPredictionModel(id)` is the same factory-registry pattern as `src/lib/api/index.ts`'s `getProvider()`.
+- `src/lib/predictions/` — the pure calculation layer (no Prisma calls). `poisson.ts` is the shared statistics engine every model feeds into (a (λ_home, λ_away) pair → full scoreline matrix → win/draw/win, BTTS, over 1.5/2.5/3.5 probabilities, plus `mostLikelyScoreline` — the distribution's mode, not rounded λ) — a model's only real job is estimating λ, not re-deriving probabilities. `models/` holds the four spec models as a genuine complexity ladder (`simple-average.ts` → `recent-form.ts` → `home-away.ts` → `poisson-model.ts`, each strictly using more information than the last — see inline comments for the exact formula each uses). `index.ts`'s `getPredictionModel(id)` is the same factory-registry pattern as `src/lib/api/index.ts`'s `getProvider()`.
+- `src/services/build-match-context.ts`, `predict.ts`, `evaluate-prediction.ts` — the DB-facing prediction pipeline (Phase 7). `buildMatchContext` assembles real synced data into the shape the models consume, **actually enforcing** the `dataCutoff` (via `getTeamMatchRecords`/`getLeagueAverageGoals`'s optional `beforeDate` filter) rather than just recording it — a model genuinely cannot see a match that happens after the one being predicted, which is what makes Phase 8's backtesting trustworthy later instead of leaking future information. `generatePrediction` always creates a new `Prediction` row (never overwrites); `evaluatePrediction` computes a `PredictionResult` once a match has finished and refuses to run twice for the same prediction (relies on the schema's unique constraint) rather than silently recomputing.
 
 ## Phases
 
@@ -98,7 +107,7 @@ This project is built incrementally, not all at once — each phase gets impleme
 - **Phase 4: competition/team/match pages** — `/leagues`, `/leagues/[slug]` (standings + fixtures), `/teams`, `/teams/[id]`, `/matches/[id]`, all Server Components reading Prisma directly. Honest empty states for the 11 leagues with no synced data yet, rather than a misleading blank table. Verified against live rendered HTML (no browser tool in this environment): real Premier League standings (Arsenal top, matchday 5), real Scottish Premiership data, and a real synced result (Tottenham 2-3 Aston Villa) all confirmed rendering correctly. Caught and fixed a real bug in the process: `/leagues` and `/teams` were being statically prerendered at build time by Next.js's default heuristic, which would have frozen their content to build-time database state. ✅
 - **Phase 5: statistics and analytics engine** — pure, DB-free computation functions (`computeTeamStats` serving overall/home/away/recent-form from one implementation, `computeWeightedForm` with swappable recency weighting, `computeHeadToHead`), fixture-tested (20 unit tests covering normal/all-wins/empty/weighting-sanity cases). Surfaced on `/teams/[id]` (5 stat cards: Overall/Home/Away/Last 5/Last 10, each showing its own sample size per spec's "avoid presenting statistical noise as certainty") and `/matches/[id]` (head-to-head section). Verified against live rendered HTML: Tottenham's 1 synced match (a home loss) correctly shows 0W-0D-1L on Overall/Home/Last-5/Last-10 and correctly shows the empty state on Away; head-to-head on that same match correctly resolves both team names and the real result. ✅
 - **Phase 6: prediction engine** — four models behind one `PredictionModel` interface (Simple Average → Recent Form → Home/Away → Poisson attack/defense), all feeding a shared Poisson probability engine rather than each re-deriving win/draw/BTTS/over-under math independently. 40 fixture-based unit tests (Poisson math sanity checks — probabilities sum to 1, symmetric-λ gives equal win chances — plus per-model relative-ordering checks, e.g. Model 3 correctly ignores a team's away form entirely when computing its home λ). Deliberately no database writes or CLI yet — pure calculation only, per the project's own phase split ("storage and evaluation" is Phase 7). ✅
-- Phase 7: prediction storage and evaluation
+- **Phase 7: prediction storage and evaluation** — `buildMatchContext` wires Phase 6's models to real synced data, actually enforcing `dataCutoff` (not just recording it) via new `beforeDate` filters on the underlying queries. Verified live against the real Tottenham 2-3 Aston Villa match: a prediction generated with the default cutoff (now) could see that match's own result in its own history — an intentional live-prediction edge case caused by having only one match of history total, explained and then specifically re-tested with a cutoff set to one second *before* kickoff, which correctly zeroed out both teams' history (proving the cutoff is real, not decorative). That same prediction was evaluated against the actual 2-3 result end-to-end: every `PredictionResult` field (result correctness, exact-score-vs-mode, goal errors, BTTS/over-under calls) matched hand-computed expectations exactly. Batch `npm run evaluate` correctly evaluated the other 3 stored predictions and skipped the already-evaluated one; re-evaluating a prediction throws rather than silently overwriting (confirmed). Two of the four models (home-away, poisson) correctly called the away win on this one real result; the two simpler models didn't — a real, if statistically meaningless at n=1, first data point for Phase 8's backtesting. ✅
 - Phase 8: backtesting
 - Phase 9: charts and model-performance dashboard
 - Phase 10: polish, testing, performance, documentation
