@@ -2,7 +2,7 @@
 
 A personal data-analysis and prediction platform for the top English, Scottish, and European football leagues — not a betting tool. Tracks fixtures, results, standings, and team/player statistics, and (in later phases) generates and backtests match predictions against actual results.
 
-This README documents **Phases 1-3b (foundation, data model, two live providers)**. Later phases add their own sections here as they land — see the phase list at the bottom.
+This README documents **Phases 1-4 (foundation through the first real UI)**. Later phases add their own sections here as they land — see the phase list at the bottom.
 
 ## Stack
 
@@ -82,6 +82,8 @@ Run `lint`, `typecheck`, and `test` after every change — that's the check loop
 - `src/types/football.ts` — the normalized domain types (`NormalizedTeam`, `NormalizedStandings`, `NormalizedFixture`) every provider adapter returns. Provider-specific field names/casing/enums never cross this boundary.
 - `src/services/` — sync orchestration (`standings-sync.ts`, `fixtures-sync.ts`): fetch from a provider, upsert `Team` rows, write `LeagueStanding`/`Match` rows. Each is independently callable and has its own `scripts/sync-*.ts` CLI entry point — deliberately not one combined sync function.
 - `src/components/nav.tsx` / `placeholder-page.tsx` — the dashboard shell. Every route beyond Phase 1 replaces its placeholder with real content; the shell itself doesn't change.
+- `src/services/queries.ts` — read-side Prisma queries used by pages (`getLeagueWithLatestStandings`, `getUpcomingFixtures`, `getRecentResults`, `getTeamWithMatches`, `getMatchDetail`, `getTeamsWithData`), separate from the write-side sync services above.
+- `src/app/leagues/`, `/teams/`, `/matches/` — Server Components querying Prisma directly (no API routes — this is one app, not a frontend talking to a separate backend). `/leagues/[slug]`, `/teams/[id]`, and `/matches/[id]` all declare `export const dynamic = "force-dynamic"` where Next.js's default static optimization would otherwise have baked in build-time database state for pages with no dynamic route segment (`/leagues`, `/teams` needed this explicitly — caught during Phase 4's own build verification).
 
 ## Phases
 
@@ -91,7 +93,7 @@ This project is built incrementally, not all at once — each phase gets impleme
 - **Phase 2: database schema** — full 11-model domain schema, migrated and verified against the live database; seed script for Competition/Season. ✅
 - **Phase 3: `FootballDataProvider` abstraction + first provider** — football-data.org adapter with Zod-validated normalization, retry/backoff, per-run caching and rate-limit tracking; `standings`/`fixtures` sync jobs verified against the live API and database (20 teams, 20 standings rows, 9 matches for Premier League). ✅
 - **Phase 3b: second provider (Scottish Premiership gap)** — planned around API-Football, but live testing revealed its free tier is historical-only (2022-2024), not current-season at all (corrected in `docs/providers.md`). Pivoted to Sportmonks, independently verified live before building anything on it — genuinely current-season, confirmed with real data matching reality (Celtic top of the table, 18pts). Auto-routing (`resolveProviderForLeague`) added so sync services never need to know which provider covers which league. Verified: 12 teams, 12 standings rows, 9 matches for Scottish Premiership. Segunda División/2. Bundesliga/Serie B/Ligue 2 remain without a free current-season source. ✅
-- Phase 4: competition/team/match pages
+- **Phase 4: competition/team/match pages** — `/leagues`, `/leagues/[slug]` (standings + fixtures), `/teams`, `/teams/[id]`, `/matches/[id]`, all Server Components reading Prisma directly. Honest empty states for the 11 leagues with no synced data yet, rather than a misleading blank table. Verified against live rendered HTML (no browser tool in this environment): real Premier League standings (Arsenal top, matchday 5), real Scottish Premiership data, and a real synced result (Tottenham 2-3 Aston Villa) all confirmed rendering correctly. Caught and fixed a real bug in the process: `/leagues` and `/teams` were being statically prerendered at build time by Next.js's default heuristic, which would have frozen their content to build-time database state. ✅
 - Phase 5: statistics and analytics engine
 - Phase 6: prediction engine (statistical models, then Poisson)
 - Phase 7: prediction storage and evaluation
