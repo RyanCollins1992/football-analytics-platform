@@ -18,3 +18,15 @@ export function linearWeights(n: number): number[] {
   if (n === 0) return [];
   return Array.from({ length: n }, (_, i) => Math.max(1 - i / n, 1 / n));
 }
+
+/** Generic weighted mean — used for weighted points (computeWeightedForm), weighted goals (Recent Form prediction model), and anywhere else "recent matters more" applies to a plain number series. */
+export function weightedAverage(values: number[], weights: number[]): number {
+  if (values.length === 0) return 0;
+  let weightedSum = 0;
+  let totalWeight = 0;
+  values.forEach((value, i) => {
+    weightedSum += value * weights[i];
+    totalWeight += weights[i];
+  });
+  return totalWeight === 0 ? 0 : weightedSum / totalWeight;
+}
