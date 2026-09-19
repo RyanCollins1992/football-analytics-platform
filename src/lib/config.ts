@@ -89,4 +89,4 @@ export function resolveProviderForLeague(slug: string): ProviderId | null {
 
 export const DEFAULT_LOOKBACK_MATCHES = 10;
 export const DEFAULT_SEASON = new Date().getFullYear();
-export const DEFAULT_PREDICTION_MODEL = "poisson-v1";
+export const DEFAULT_PREDICTION_MODEL = "poisson";

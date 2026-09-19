@@ -3,6 +3,41 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Chart tokens — dataviz skill's validated reference palette, re-checked
+     with scripts/validate_palette.js against this app's own surfaces
+     (see docs/providers.md-adjacent Phase 9 plan for the validation output). */
+  --chart-surface: #ffffff;
+  --chart-ink-primary: #171717;
+  --chart-ink-secondary: #52514e;
+  --chart-ink-muted: #898781;
+  --chart-gridline: #e1e0d9;
+  --chart-baseline: #c3c2b7;
+
+  /* Categorical — one hue per prediction model, fixed order, never cycled:
+     simple-average, recent-form, home-away, poisson. */
+  --chart-series-1: #2a78d6; /* blue */
+  --chart-series-2: #eb6834; /* orange */
+  --chart-series-3: #1baf7a; /* aqua */
+  --chart-series-4: #eda100; /* yellow */
+
+  /* Sequential blue ramp — scoreline-probability heatmap (low -> high probability).
+     Each step pairs with its own readable text color, since which end is
+     "dark" flips between light/dark mode (see the dark block below). */
+  --chart-seq-100: #cde2fb;
+  --chart-seq-100-text: #0b0b0b;
+  --chart-seq-200: #9ec5f4;
+  --chart-seq-200-text: #0b0b0b;
+  --chart-seq-300: #6da7ec;
+  --chart-seq-300-text: #0b0b0b;
+  --chart-seq-400: #3987e5;
+  --chart-seq-400-text: #ffffff;
+  --chart-seq-500: #256abf;
+  --chart-seq-500-text: #ffffff;
+  --chart-seq-600: #184f95;
+  --chart-seq-600-text: #ffffff;
+  --chart-seq-700: #0d366b;
+  --chart-seq-700-text: #ffffff;
 }
 
 @theme inline {
@@ -16,6 +51,33 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --chart-surface: #0a0a0a;
+    --chart-ink-primary: #ffffff;
+    --chart-ink-secondary: #c3c2b7;
+    --chart-ink-muted: #898781;
+    --chart-gridline: #2c2c2a;
+    --chart-baseline: #383835;
+
+    --chart-series-1: #3987e5;
+    --chart-series-2: #d95926;
+    --chart-series-3: #199e70;
+    --chart-series-4: #c98500;
+
+    --chart-seq-100: #184f95;
+    --chart-seq-100-text: #ffffff;
+    --chart-seq-200: #1c5cab;
+    --chart-seq-200-text: #ffffff;
+    --chart-seq-300: #256abf;
+    --chart-seq-300-text: #ffffff;
+    --chart-seq-400: #2a78d6;
+    --chart-seq-400-text: #ffffff;
+    --chart-seq-500: #3987e5;
+    --chart-seq-500-text: #ffffff;
+    --chart-seq-600: #5598e7;
+    --chart-seq-600-text: #0b0b0b;
+    --chart-seq-700: #86b6ef;
+    --chart-seq-700-text: #0b0b0b;
   }
 }
 
