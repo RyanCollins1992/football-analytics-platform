@@ -3,6 +3,7 @@ import { listPredictionModels } from "@/lib/predictions";
 import { DEFAULT_PREDICTION_MODEL } from "@/lib/config";
 import { getLatestPredictionsForMatches, getUpcomingMatchesAcrossLeagues } from "@/services/queries";
 import { ScorelineHeatmap } from "@/components/charts/scoreline-heatmap";
+import { NoHistoryCaveat } from "@/components/no-history-caveat";
 
 export const dynamic = "force-dynamic";
 
@@ -83,12 +84,7 @@ export default async function PredictionsPage(props: PageProps<"/predictions">) 
                     No prediction generated yet for the {modelId} model.
                   </p>
                 ) : prediction.predictedHomeGoals === 0 && prediction.predictedAwayGoals === 0 ? (
-                  <p className="mt-4 rounded-lg border border-dashed border-black/15 px-4 py-4 text-sm text-black/50 dark:border-white/15 dark:text-white/50">
-                    At least one of these teams has no finished matches synced yet — every model needs real prior
-                    results to work from, so this comes back 0.00–0.00 rather than a meaningful prediction. This
-                    resolves as more history is synced (<code className="rounded bg-black/5 px-1 dark:bg-white/10">npm run sync:fixtures</code>),
-                    not by switching models.
-                  </p>
+                  <NoHistoryCaveat />
                 ) : (
                   <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
                     <div className="text-sm">
