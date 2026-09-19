@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -12,10 +10,294 @@ datasource db {
   provider = "postgresql"
 }
 
-// Phase 1 placeholder — proves migrations run end-to-end against the real
-// database. Removed once Phase 2 introduces the real domain model
-// (Competition/Team/Match/Prediction/etc).
-model HealthCheck {
-  id        Int      @id @default(autoincrement())
-  checkedAt DateTime @default(now())
+// Reuses football-data.org's own documented vocabulary (docs/providers.md)
+// rather than inventing a parallel one — one canonical status set that every
+// provider adapter maps its own values onto.
+enum CompetitionType {
+  LEAGUE
+  LEAGUE_CUP
+  CUP
+  PLAYOFFS
+}
+
+enum MatchStatus {
+  SCHEDULED
+  TIMED
+  IN_PLAY
+  PAUSED
+  EXTRA_TIME
+  PENALTY_SHOOTOUT
+  FINISHED
+  SUSPENDED
+  POSTPONED
+  CANCELLED
+  AWARDED
+}
+
+enum PlayerPosition {
+  GOALKEEPER
+  DEFENDER
+  MIDFIELDER
+  FORWARD
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  INJURED
+  SUSPENDED
+  DOUBTFUL
+}
+
+model Competition {
+  id        Int             @id @default(autoincrement())
+  slug      String          @unique // matches SUPPORTED_LEAGUES[].id in src/lib/config.ts
+  name      String
+  country   String
+  type      CompetitionType @default(LEAGUE)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  seasons          Season[]
+  competitionTeams CompetitionTeam[]
+  matches          Match[]
+  standings        LeagueStanding[]
+}
+
+model Season {
+  id            Int         @id @default(autoincrement())
+  competitionId Int
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  name          String // e.g. "2026/27"
+  year          Int // e.g. 2026 — sortable/filterable
+  startDate     DateTime?
+  endDate       DateTime?
+  isCurrent     Boolean     @default(false)
+
+  competitionTeams CompetitionTeam[]
+  matches          Match[]
+  standings        LeagueStanding[]
+
+  @@unique([competitionId, name])
+  @@index([competitionId, isCurrent])
+}
+
+model Team {
+  id                Int      @id @default(autoincrement())
+  name              String
+  shortName         String?
+  country           String?
+  logo              String?
+  stadium           String?
+  stadiumCapacity   Int?
+  footballDataOrgId String?  @unique
+  apiFootballId     String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  competitionTeams CompetitionTeam[]
+  players          Player[]
+  homeMatches      Match[]           @relation("HomeTeam")
+  awayMatches      Match[]           @relation("AwayTeam")
+  matchStatistics  MatchStatistics[]
+  lineups          Lineup[]
+  standings        LeagueStanding[]
+}
+
+model CompetitionTeam {
+  id            Int         @id @default(autoincrement())
+  competitionId Int
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  seasonId      Int
+  season        Season      @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  teamId        Int
+  team          Team        @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  @@unique([seasonId, teamId])
+  @@index([competitionId])
+}
+
+model Player {
+  id                Int             @id @default(autoincrement())
+  name              String
+  position          PlayerPosition?
+  detailedPosition  String? // exact provider text, e.g. "Left-Back" — position enum is the broad bucket
+  nationality       String?
+  dateOfBirth       DateTime?
+  teamId            Int?
+  team              Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  footballDataOrgId String?         @unique
+  apiFootballId     String?         @unique
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  availability PlayerAvailability[]
+  lineups      Lineup[]
+
+  @@index([teamId])
+}
+
+model PlayerAvailability {
+  id             Int                @id @default(autoincrement())
+  playerId       Int
+  player         Player             @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  status         AvailabilityStatus
+  injuryType     String?
+  description    String?
+  startDate      DateTime?
+  expectedReturn DateTime?
+  lastUpdated    DateTime           @updatedAt
+
+  @@index([playerId, status])
+}
+
+model Match {
+  id                Int         @id @default(autoincrement())
+  competitionId     Int
+  competition       Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  seasonId          Int
+  season            Season      @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  homeTeamId        Int
+  homeTeam          Team        @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
+  awayTeamId        Int
+  awayTeam          Team        @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
+  matchday          Int?
+  scheduledAt       DateTime
+  status            MatchStatus @default(SCHEDULED)
+  homeScore         Int?
+  awayScore         Int?
+  halfTimeHomeScore Int?
+  halfTimeAwayScore Int?
+  homeXg            Float?
+  awayXg            Float?
+  venue             String?
+  footballDataOrgId String?     @unique
+  apiFootballId     String?     @unique
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  statistics  MatchStatistics[]
+  lineups     Lineup[]
+  predictions Prediction[]
+
+  @@index([competitionId, seasonId])
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+// One row per team per match (not paired home_/away_ columns) — every
+// analytics query ("average shots per team") is a plain WHERE teamId = ?
+// instead of a home/away UNION.
+model MatchStatistics {
+  id            Int    @id @default(autoincrement())
+  matchId       Int
+  match         Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  teamId        Int
+  team          Team   @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  shots         Int?
+  shotsOnTarget Int?
+  possession    Float? // percentage, 0-100
+  corners       Int?
+  fouls         Int?
+  yellowCards   Int?
+  redCards      Int?
+  offsides      Int?
+  xg            Float?
+
+  @@unique([matchId, teamId])
+}
+
+model Lineup {
+  id            Int     @id @default(autoincrement())
+  matchId       Int
+  match         Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  teamId        Int
+  team          Team    @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  playerId      Int
+  player        Player  @relation(fields: [playerId], references: [id], onDelete: Restrict)
+  isStarter     Boolean
+  position      String?
+  minutesPlayed Int?
+  rating        Float?
+
+  @@unique([matchId, playerId])
+  @@index([matchId, teamId])
+}
+
+// Historical standings, not just the current table: one row per
+// (season, team, matchday) snapshot rather than overwriting in place.
+model LeagueStanding {
+  id             Int         @id @default(autoincrement())
+  competitionId  Int
+  competition    Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  seasonId       Int
+  season         Season      @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  teamId         Int
+  team           Team        @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  matchday       Int?
+  position       Int
+  played         Int
+  wins           Int
+  draws          Int
+  losses         Int
+  goalsFor       Int
+  goalsAgainst   Int
+  goalDifference Int
+  points         Int
+  snapshotDate   DateTime    @default(now())
+
+  @@unique([seasonId, teamId, matchday])
+  @@index([competitionId, seasonId])
+}
+
+// Never overwritten — every prediction stays stored so it can be evaluated
+// against the eventual result and compared across model versions later.
+model Prediction {
+  id                          Int      @id @default(autoincrement())
+  matchId                     Int
+  match                       Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  modelId                     String
+  modelVersion                String
+  createdAt                   DateTime @default(now())
+  dataCutoff                  DateTime // last moment of data used by the model — never later than createdAt (enforced in app code)
+  predictedHomeGoals          Float
+  predictedAwayGoals          Float
+  predictedHomeWinProbability Float
+  predictedDrawProbability    Float
+  predictedAwayWinProbability Float
+  predictedTotalGoals         Float
+  predictedBttsProbability    Float
+  predictedOver15Probability  Float?
+  predictedOver25Probability  Float?
+  predictedOver35Probability  Float?
+  confidence                  Float?
+  modelParameters             Json?
+  featureVersion              String?
+
+  result PredictionResult?
+
+  @@index([matchId])
+  @@index([modelId, modelVersion])
+}
+
+model PredictionResult {
+  id                  Int        @id @default(autoincrement())
+  predictionId        Int        @unique
+  prediction          Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  actualHomeGoals     Int
+  actualAwayGoals     Int
+  actualTotalGoals    Int
+  homeWinCorrect      Boolean
+  drawCorrect         Boolean
+  awayWinCorrect      Boolean
+  exactScoreCorrect   Boolean
+  goalPredictionError Float
+  homeGoalError       Float
+  awayGoalError       Float
+  bttsCorrect         Boolean
+  over15Correct       Boolean?
+  over25Correct       Boolean?
+  over35Correct       Boolean?
+  createdAt           DateTime   @default(now())
 }
