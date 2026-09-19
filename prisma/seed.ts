@@ -1,4 +1,4 @@
-import { prisma } from "../src/lib/db";
+import { prisma } from "../src/lib/database/client";
 import { getEnabledLeagues, DEFAULT_SEASON } from "../src/lib/config";
 
 /**
