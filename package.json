@@ -15,7 +15,8 @@
     "sync:standings": "tsx scripts/sync-standings.ts",
     "sync:fixtures": "tsx scripts/sync-fixtures.ts",
     "predict": "tsx scripts/predict.ts",
-    "evaluate": "tsx scripts/evaluate.ts"
+    "evaluate": "tsx scripts/evaluate.ts",
+    "backtest": "tsx scripts/backtest.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
