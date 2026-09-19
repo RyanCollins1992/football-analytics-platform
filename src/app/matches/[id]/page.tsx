@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMatchDetail } from "@/services/queries";
+import { getHeadToHeadMatches, getMatchDetail } from "@/services/queries";
+import { computeHeadToHead } from "@/lib/analytics/head-to-head";
 
 function formatKickoff(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -36,6 +37,8 @@ export default async function MatchDetailPage(props: PageProps<"/matches/[id]">)
   if (!match) notFound();
 
   const played = match.homeScore !== null && match.awayScore !== null;
+  const h2hMatches = await getHeadToHeadMatches(match.homeTeam.id, match.awayTeam.id);
+  const h2h = computeHeadToHead(match.homeTeam.id, match.awayTeam.id, h2hMatches);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16">
@@ -75,6 +78,48 @@ export default async function MatchDetailPage(props: PageProps<"/matches/[id]">)
 
       <section className="mt-10">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">
+          Head-to-head
+        </h2>
+        {h2h.meetings === 0 ? (
+          <p className="mt-4 rounded-lg border border-dashed border-black/15 px-4 py-6 text-sm text-black/50 dark:border-white/15 dark:text-white/50">
+            No previous meetings synced between these two teams yet.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <MiniStat label={`${match.homeTeam.name} wins`} value={h2h.teamAWins} />
+              <MiniStat label="Draws" value={h2h.draws} />
+              <MiniStat label={`${match.awayTeam.name} wins`} value={h2h.teamBWins} />
+              <MiniStat label="Avg. goals" value={h2h.avgTotalGoals.toFixed(1)} />
+              <MiniStat label="BTTS" value={`${h2h.bttsPercentage.toFixed(0)}%`} />
+              <MiniStat label="Over 1.5" value={`${h2h.over15Percentage.toFixed(0)}%`} />
+              <MiniStat label="Over 2.5" value={`${h2h.over25Percentage.toFixed(0)}%`} />
+              <MiniStat label="Over 3.5" value={`${h2h.over35Percentage.toFixed(0)}%`} />
+            </div>
+            <p className="text-xs text-black/40 dark:text-white/40">
+              Based on {h2h.meetings} previous meeting{h2h.meetings === 1 ? "" : "s"} &mdash; a small sample isn&rsquo;t
+              strong evidence on its own.
+            </p>
+            <ul className="divide-y divide-black/10 dark:divide-white/10">
+              {h2h.matches.map((m) => (
+                <li key={m.matchId} className="flex items-center justify-between py-2 text-sm">
+                  <Link href={`/matches/${m.matchId}`} className="text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white">
+                    {new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(m.scheduledAt)}
+                  </Link>
+                  <span className="tabular-nums font-medium">
+                    {m.homeTeamId === match.homeTeam.id
+                      ? `${match.homeTeam.name} ${m.homeScore}–${m.awayScore} ${match.awayTeam.name}`
+                      : `${match.awayTeam.name} ${m.homeScore}–${m.awayScore} ${match.homeTeam.name}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-black/40 dark:text-white/40">
           Match statistics
         </h2>
         {match.statistics.length === 0 ? (
@@ -98,6 +143,15 @@ export default async function MatchDetailPage(props: PageProps<"/matches/[id]">)
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-black/10 p-3 text-center dark:border-white/10">
+      <p className="text-lg font-semibold tabular-nums">{value}</p>
+      <p className="mt-0.5 text-xs text-black/50 dark:text-white/50">{label}</p>
     </div>
   );
 }

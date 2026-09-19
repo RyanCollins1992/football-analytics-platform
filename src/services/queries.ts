@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/database/client";
+import type { TeamMatchRecord } from "@/lib/analytics/team-stats";
+import type { HeadToHeadMatch } from "@/lib/analytics/head-to-head";
 
 /** Read-side queries used by pages — distinct from the write-side sync services in this same folder. */
 
@@ -79,6 +81,55 @@ export async function getMatchDetail(matchId: number) {
       statistics: { include: { team: true } },
     },
   });
+}
+
+/** Newest first, oriented to this team's perspective — no home/away branching needed by the analytics functions that consume this. */
+export async function getTeamMatchRecords(teamId: number): Promise<TeamMatchRecord[]> {
+  const matches = await prisma.match.findMany({
+    where: {
+      status: "FINISHED",
+      OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }],
+      homeScore: { not: null },
+      awayScore: { not: null },
+    },
+    orderBy: { scheduledAt: "desc" },
+  });
+
+  return matches.map((m) => {
+    const isHome = m.homeTeamId === teamId;
+    return {
+      matchId: m.id,
+      scheduledAt: m.scheduledAt,
+      isHome,
+      goalsFor: (isHome ? m.homeScore : m.awayScore) as number,
+      goalsAgainst: (isHome ? m.awayScore : m.homeScore) as number,
+    };
+  });
+}
+
+/** Newest first — finished matches between exactly these two teams, either venue. */
+export async function getHeadToHeadMatches(teamAId: number, teamBId: number): Promise<HeadToHeadMatch[]> {
+  const matches = await prisma.match.findMany({
+    where: {
+      status: "FINISHED",
+      homeScore: { not: null },
+      awayScore: { not: null },
+      OR: [
+        { homeTeamId: teamAId, awayTeamId: teamBId },
+        { homeTeamId: teamBId, awayTeamId: teamAId },
+      ],
+    },
+    orderBy: { scheduledAt: "desc" },
+  });
+
+  return matches.map((m) => ({
+    matchId: m.id,
+    scheduledAt: m.scheduledAt,
+    homeTeamId: m.homeTeamId,
+    awayTeamId: m.awayTeamId,
+    homeScore: m.homeScore as number,
+    awayScore: m.awayScore as number,
+  }));
 }
 
 export async function getTeamsWithData() {
