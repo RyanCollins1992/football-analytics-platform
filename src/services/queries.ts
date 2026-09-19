@@ -226,35 +226,43 @@ export interface CompetitionDataStatus {
  * the spec never defines a staleness threshold, so this reports the facts
  * (team/match counts, most recent synced match) and lets the reader judge.
  */
+/**
+ * 4 queries total regardless of league count (a findMany plus 3 grouped
+ * aggregates), not a fan-out of ~4 queries per enabled league — the
+ * per-league version fired ~52 queries for the 13 currently-enabled leagues.
+ */
 export async function getDataStatus(): Promise<CompetitionDataStatus[]> {
   const enabled = getEnabledLeagues();
+  const slugs = enabled.map((league) => league.id);
 
-  return Promise.all(
-    enabled.map(async (league) => {
-      const competition = await prisma.competition.findUnique({ where: { slug: league.id } });
-      if (!competition) {
-        return { slug: league.id, name: league.name, teamCount: 0, matchCount: 0, mostRecentMatchAt: null };
-      }
+  const competitions = await prisma.competition.findMany({ where: { slug: { in: slugs } } });
+  const competitionIds = competitions.map((c) => c.id);
 
-      const [teamCount, matchCount, mostRecent] = await Promise.all([
-        prisma.competitionTeam.count({ where: { competitionId: competition.id } }),
-        prisma.match.count({ where: { competitionId: competition.id } }),
-        prisma.match.findFirst({
-          where: { competitionId: competition.id },
-          orderBy: { scheduledAt: "desc" },
-          select: { scheduledAt: true },
-        }),
-      ]);
+  const [teamCounts, matchCounts, mostRecentMatches] = await Promise.all([
+    prisma.competitionTeam.groupBy({ by: ["competitionId"], where: { competitionId: { in: competitionIds } }, _count: true }),
+    prisma.match.groupBy({ by: ["competitionId"], where: { competitionId: { in: competitionIds } }, _count: true }),
+    prisma.match.groupBy({ by: ["competitionId"], where: { competitionId: { in: competitionIds } }, _max: { scheduledAt: true } }),
+  ]);
 
-      return {
-        slug: league.id,
-        name: league.name,
-        teamCount,
-        matchCount,
-        mostRecentMatchAt: mostRecent?.scheduledAt ?? null,
-      };
-    })
-  );
+  const competitionBySlug = new Map(competitions.map((c) => [c.slug, c]));
+  const teamCountByCompetitionId = new Map(teamCounts.map((row) => [row.competitionId, row._count]));
+  const matchCountByCompetitionId = new Map(matchCounts.map((row) => [row.competitionId, row._count]));
+  const mostRecentByCompetitionId = new Map(mostRecentMatches.map((row) => [row.competitionId, row._max.scheduledAt]));
+
+  return enabled.map((league) => {
+    const competition = competitionBySlug.get(league.id);
+    if (!competition) {
+      return { slug: league.id, name: league.name, teamCount: 0, matchCount: 0, mostRecentMatchAt: null };
+    }
+
+    return {
+      slug: league.id,
+      name: league.name,
+      teamCount: teamCountByCompetitionId.get(competition.id) ?? 0,
+      matchCount: matchCountByCompetitionId.get(competition.id) ?? 0,
+      mostRecentMatchAt: mostRecentByCompetitionId.get(competition.id) ?? null,
+    };
+  });
 }
 
 /**

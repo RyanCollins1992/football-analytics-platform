@@ -44,18 +44,18 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
 }
 
 export default async function DashboardPage() {
-  const [todays, upcoming, recent, dataStatus, modelPerformance, leagueCount] = await Promise.all([
-    getTodaysMatches(),
-    getUpcomingMatchesAcrossLeagues(7),
-    getRecentResultsAcrossLeagues(8),
-    getDataStatus(),
-    getModelPerformance(),
-    prisma.competition.count(),
-  ]);
-
-  const upcomingCount = await prisma.match.count({ where: { status: { in: ["SCHEDULED", "TIMED"] } } });
-  const predictionCount = await prisma.prediction.count();
-  const evaluatedCount = await prisma.predictionResult.count();
+  const [todays, upcoming, recent, dataStatus, modelPerformance, leagueCount, upcomingCount, predictionCount, evaluatedCount] =
+    await Promise.all([
+      getTodaysMatches(),
+      getUpcomingMatchesAcrossLeagues(7),
+      getRecentResultsAcrossLeagues(8),
+      getDataStatus(),
+      getModelPerformance(),
+      prisma.competition.count(),
+      prisma.match.count({ where: { status: { in: ["SCHEDULED", "TIMED"] } } }),
+      prisma.prediction.count(),
+      prisma.predictionResult.count(),
+    ]);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-16">
